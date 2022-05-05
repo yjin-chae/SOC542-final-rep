@@ -1,0 +1,508 @@
+---
+output: 
+  pdf_document:
+    keep_tex: true
+    fig_caption: yes
+geometry: margin=1in
+
+title: The Replication Project
+
+date: "May 11, 2022"
+author: "YJ Chae"
+
+bibliography: bibliography.bib
+fontfamily: mathpazo
+fontsize: 12pt
+urlcolor: black
+header-includes:
+    - \pagenumbering{arabic}
+    - \usepackage{setspace}\doublespacing
+    - \usepackage{booktabs}
+---
+
+```{r setup, include=FALSE}
+# This cell contains default chunk options
+# These will be applied to all chunks unless an individual chunk is modified
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(include = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(dev = 'pdf')
+knitr::opts_chunk$set(cache = TRUE)
+
+library(haven)
+library(clock)
+library(mice)
+library(foreach)
+library(parallel)
+library(lme4)
+library(merTools)
+library(cmdstanr)
+library(brms)
+library(modelsummary)
+library(tidyverse)
+
+# You may modify this chunk to include additional options
+# For example, there are options that can change the layout for all figures
+
+# You can also modify the header options above this chunk to change the
+# formatting of the output, but do so at your own risk.
+
+# This book provides lots of tips for using RMarkdown: https://bookdown.org/yihui/rmarkdown-cookbook/
+```
+
+# INTRODUCTION
+
+For the final replication project, I chose a work by @RN222. Using data from the Fragile Families and Child Wellbeing Study (FFCW), this study investigates how mothers' exposure to family structure transitions and its durations are associated with changes in maternal resources-- parenting stress, depression, and material hardship. For replication, I focused on parenting stress, for it was the only dependent variable without issues. That is, the authors stated that a hierarchical linear regression of depression with random intercepts and coefficients failed to converge. For material hardship, I found the FFCW data set lacked one variable, phone disconnection, that the authors purported to use to construct the material hardship scale.  
+Although I could not find code to replicate the data set and models in the study, I managed to write code to produce a similar data set and models. 
+
+# REPLICATION
+
+Table 1 and 2 show the original and replicated coefficients, respectively. The replication was a half-success; the slope parameters of the hierarchical linear models (HLM) were quite closely replicated but the intercept parameters were not. My conjecture is that the discrepancies in the intercepts can probably result from misconstructed controls when estimating the intercepts. That is, a full set of covariates were included to estimate the intercepts, whereas only a subset of them (and the independent variable) were interacted with `AGE` to estimate the slopes; as I had no problem cleaning a few controls for the slopes but encountered several issues cleaning controls for the intercepts, more discrepancy is likely in the intercepts. For example, Temporary Assistance for Needy Families (TANF), which should have been included to estimate the intercepts but not the slopes, was missing in the original FFCW data set.
+
+```{r data}
+original <- haven::read_spss("FF_allwaves_2020v2_SPSS.sav")
+
+## Sample : PCG - biological mother
+total <- original %>%
+  filter(cm1intmon != -9, cm2mint == 1, cm3mint == 1, cm4mint == 1)
+
+Y1age_imp <- total %>%
+  dplyr::select(idnum, cm1intyr, cm1intmon, cm2intyr, cm2intmon) %>% 
+  mutate(Y0 = date_build(cm1intyr, month = cm1intmon),
+         Y1 = date_build(cm2intyr, month = cm2intmon),
+         Y1age_imp = round(as.numeric(Y1 - Y0) / 31)) %>%
+  dplyr::select(idnum, Y1age_imp)
+
+## Material Hardship
+b_age <- total %>% 
+  dplyr::select(idnum, cm2b_age, cm3b_age, cm4b_age) %>% 
+  full_join(Y1age_imp, by = "idnum") %>% 
+  mutate(across(-idnum, ~ ifelse(.x < 0, NA, .x)),
+         cm2b_age = ifelse(is.na(cm2b_age), Y1age_imp, cm2b_age),
+         cm2b_age = cm2b_age - 11, ## Age 1
+         cm3b_age = cm3b_age - 35, ## Age 3
+         cm4b_age = cm4b_age - 59, ## Age 5
+         age2_group = case_when(
+           cm2b_age %in% -5:-3 ~ -1,
+           cm2b_age %in% -2:0 ~ 0,
+           cm2b_age %in% 1:3 ~ 1,
+           cm2b_age %in% 4:6 ~ 2,
+           cm2b_age %in% 7:9 ~ 3,
+           cm2b_age %in% 10:12 ~ 4,
+           cm2b_age %in% 13:15 ~ 5,
+           cm2b_age %in% 16:18 ~ 6,
+           cm2b_age %in% 19:21 ~ 7,
+         ),
+         age3_group = case_when(
+           cm3b_age %in% -5:-3 ~ -1,
+           cm3b_age %in% -2:0 ~ 0,
+           cm3b_age %in% 1:3 ~ 1,
+           cm3b_age %in% 4:6 ~ 2,
+           cm3b_age %in% 7:9 ~ 3,
+           cm3b_age %in% 10:12 ~ 4,
+           cm3b_age %in% 13:15 ~ 5
+         ),
+         age4_group = case_when(
+           cm4b_age %in% -5:-3 ~ -1,
+           cm4b_age %in% -2:0 ~ 0,
+           cm4b_age %in% 1:3 ~ 1,
+           cm4b_age %in% 4:6 ~ 2,
+           cm4b_age %in% 7:9 ~ 3,
+           cm4b_age %in% 10:12 ~ 4,
+           cm4b_age %in% 13:15 ~ 5
+         )) %>% 
+  dplyr::select(idnum, starts_with("age"))
+
+stress.tmp <- total %>%
+  dplyr::select(idnum, m2b20a:m2b20d, m3b6a:m3b6d, m4b6a:m4b6d) %>%
+  mutate(across(-idnum, ~ c(1, 2, 3, 4)[match(.x, c(4, 3, 2, 1))])) %>%
+  mutate(w2_stress = rowMeans(across(starts_with("m2"))),
+         w3_stress = rowMeans(across(starts_with("m3"))),
+         w4_stress = rowMeans(across(starts_with("m4")))) %>%
+  dplyr::select(idnum, starts_with("w"))
+
+## Full set of dependent variables; age standardized in three-month age intervals.
+dep.tmp <- left_join(b_age, stress.tmp, by = "idnum") %>% 
+  group_by(age2_group) %>% 
+  mutate(w2_stressz = scale(w2_stress)[ ,1]) %>% ungroup() %>% 
+  group_by(age3_group) %>% 
+  mutate(w3_stressz = scale(w3_stress)[ ,1]) %>% ungroup() %>% 
+  group_by(age4_group) %>% 
+  mutate(w4_stressz = scale(w4_stress)[ ,1]) %>% ungroup() %>% 
+  filter(!(is.na(w2_stress) & is.na(w3_stress) & is.na(w4_stress)))
+
+## demographic characteristics set 1
+demo.tmp <- total %>%
+  dplyr::select(idnum, cm1bsex, cm1ethrace, cm1edu, cf1edu, cm1age, cf1age, cm1lbw,
+                m1h2, f1h2, m1a12, m1e2) %>%
+  mutate(across(-idnum, ~ ifelse(.x < 0, NA, .x))) %>%
+  mutate(tc1_kgirl = c(0, 1)[match(cm1bsex, c(1, 2))],
+         tc1_mwithp = c(1, 0)[match(m1e2, c(1, 2))],
+         tc1_kfirst = c(1, 0)[match(m1a12, c(2, 1))],
+         across(ends_with("race"), ~ factor(.x, levels = c(1, 2, 3, 4), labels = c("White", "Black", "Hispanic", "Other"))),
+         across(ends_with("edu"), ~ factor(c(1, 2, 3, 3)[match(.x, 1:4)], levels = c(1, 2, 3), labels = c("LtH", "HG", "Col"))),
+         across(ends_with("h2"), ~ c(1, 0)[match(.x, c(1, 2))])) %>% ## Immigration status: reverse-coded so that 1 = US Born.
+  rename(tc1_mage = cm1age, tc1_fage = cf1age, tc1_klbw = cm1lbw) %>%
+  rename_with(~ paste0("tc1_", substr(.x, 2, 2), "eth"), ends_with("race")) %>%
+  rename_with(~ paste0("tc1_", substr(.x, 2, 2), "edu"), ends_with("edu")) %>%
+  rename_with(~ paste0("tc1_", substr(.x, 1, 1), "imm"), ends_with("h2")) %>%
+  dplyr::select(idnum, starts_with("tc"), starts_with("w"))
+
+## demographic characteristics set 2
+demo1.tmp <- total %>%
+  dplyr::select(idnum,
+                tc1_kids = cm1kids, ## Num of children in HH
+                tc1_adults = cm1adult, ## Num of adults in hh
+                m1g2, m1g3, m1g4,
+                m1f6, ## How often religion attendance?
+                f2j11, ## Sought help for substance problem?
+                m1b1a, m1b1b, ## Years and months of parental relationship at birth
+                m1b27, ## Considered abortion?
+                m1f2, ## Own a house?
+                cm2gdad, cm2gmom, cf2gdad, cf2gmom, ## Gparents in hh
+                cm2ffevjail,
+                m2c34, ## Father has limiting condition
+                m2d6h,
+                m2h10a, m2h10b, ## Age0 TANF; (among those who received TANF at Age0) Age1 TANF (-6 == 0)
+                cm1hhinc, cm2hhinc) %>%  
+  mutate(tc2_tanfY0 = c(1, 0)[match(m2h10a, c(1, 2))],
+         tc2_tanf = c(1, 0, 0)[match(m2h10b, c(1, 2, -6))],
+         tc2_flimit = c(1, 0, 0, 0)[match(m2c34, c(1, 2, -5, -6))],
+         across(-idnum, ~ ifelse(.x < 0, NA, .x)),
+         tc1_malc = ifelse(m1g2 == 5, 0, 1),
+         tc1_mdrug = ifelse(m1g3 == 5, 0, 1),
+         tc1_msmoke = ifelse(m1g4 == 4, 0, 1),
+         tc1_mrelig = c(1, 2, 3, 4, 5)[match(m1f6, 5:1)],
+         tc2_fsubp = ifelse(f2j11 == 1, 1, 0),
+         tc1_mhhown = ifelse(m1f2 == 1, 1, 0),
+         tc1_relLen = ifelse(!is.na(m1b1a), m1b1a * 12, m1b1b),
+         tc1_abort = ifelse(m1b27 == 1, 1, 0),
+         tc2_gparent = ifelse(rowSums(across(ends_with(c("gdad", "gmom")))) >= 1, 1, 0),
+         tc2_finjail = ifelse(cm2ffevjail == 1, 1, 0),
+         tc2_fabuse = ifelse(m2d6h %in% 1:2, 1, 0),
+         tc1_lnincome = log(cm1hhinc + 1),
+         tc2_lnincome = log(cm2hhinc + 1)) %>% 
+  dplyr::select(idnum, starts_with("tc"))
+
+## Employment Status
+work.tmp <- total %>%
+  dplyr::select(idnum, f1j6, m1i2a, m2k9) %>%
+  mutate(across(-idnum, ~ ifelse(.x < 0, NA, .x))) %>%
+  mutate(across(-idnum, ~ ifelse(.x >= 30, 1, 0))) %>%
+  rename(tc1_fwork = f1j6, tc1_mwork = m1i2a, tc2_mwork = m2k9)
+
+## Family structure states and transitions
+## Will be cleaned in the final step after imputing each variables (Impute, then Transform)
+rel.tmp <- total %>%
+  dplyr::select(idnum, cm1relf, cm2relf, cm3relf, cm4relf,
+                m2e2, m3e2, m4e2,
+                cm2marp, cm3marp, cm4marp,
+                cm2cohp, cm3cohp, cm4cohp) %>% 
+  mutate(
+    across(ends_with("e2"), ~ c(1, 0, 0)[match(.x, c(1, 2, -6))]),
+    across(ends_with("relf"), ~ factor(c(1, 2, 3, 3, 3, 3, 3, 3)[match(.x, c(1, 2, 3, 4, 5, 6, 7, 8))], levels = c(1, 2, 3))),
+    across(where(is.numeric), ~ ifelse(.x < 0, NA, .x))
+  ) %>%
+  rename_with(.cols = ends_with("relf"), ~ paste0("w", substr(.x, 3, 3), "_bio.stat")) %>%
+  rename_with(.cols = ends_with("e2"), ~ paste0("w", substr(.x, 2, 2), "_ptr.exist"))
+  
+### Final Data
+tmp.data <- left_join(dep.tmp, demo.tmp, by = 'idnum') %>%
+  left_join(demo1.tmp, by = 'idnum') %>%
+  left_join(work.tmp, demo.tmp, by = 'idnum') %>%
+  left_join(rel.tmp, by = "idnum")
+
+fstate <- c("T2BP", "TSF", "TS", "SS", "SSF")
+###### Imputation
+imp <- mice::parlmice(tmp.data, n.core = 10, n.imp.core = 1, cluster.seed = 08901)
+raw <- mice::complete(imp, action = "long") %>% 
+  mutate(
+    ## Partner relationship status
+    w2_ptr.stat = ifelse(cm2marp == 1, 1,
+                         ifelse(cm2cohp == 1, 2, 3)),
+    w3_ptr.stat = ifelse(cm3marp == 1, 1,
+                         ifelse(cm3cohp == 1, 2, 3)),
+    w4_ptr.stat = ifelse(cm4marp == 1, 1,
+                         ifelse(cm4cohp == 1, 2, 3))) %>% 
+  mutate(fstate = case_when(w1_bio.stat %in% 1:2 & w2_bio.stat %in% 1:2 ~ 1, ### Stable two-biological-parent family
+                            w1_bio.stat == 3 & w2_bio.stat %in% 1:2 ~ 2, ## Transition into a two-biological-parent family
+                            w2_ptr.stat %in% 1:2 ~ 3, ## Transition into a social-father family
+                            w1_bio.stat %in% 1:2 & w2_bio.stat == 3 & w2_ptr.stat == 3 ~ 4, ## Transition into a single-mother family
+                            w1_bio.stat == 3 & w2_bio.stat == 3 & w2_ptr.stat == 3 ~ 5)) ## Stable single-mother family
+data <-  raw %>% 
+  mutate(         
+    S2BP = ifelse(fstate %in% 1:2 & w3_bio.stat %in% 1:2 & w4_bio.stat %in% 1:2, 1, 0), ## Stable two-biological-parent family
+    T2BP = ifelse(!(fstate %in% 1:2) & (w3_bio.stat %in% 1:2 | w4_bio.stat %in% 1:2), 1, 0), ## Ever Transition into a two-biological-parent family
+    SSF = ifelse(fstate == 3 & w3_ptr.stat %in% 1:2 & w4_ptr.stat %in% 1:2, 1, 0), ## Stable social-father family
+    TSF = ifelse(fstate != 3 & (w3_ptr.stat %in% 1:2 | w4_ptr.stat %in% 1:2), 1, 0), ## Ever Transition into a social-father family
+    SS = ifelse(fstate %in% 4:5 & w3_bio.stat == 3 & w3_ptr.stat == 3 & w4_bio.stat == 3 & w4_ptr.stat == 3, 1, 0), ## Stable single-mother family
+    TS = ifelse(!(fstate %in% 4:5) & ((w3_bio.stat == 3 & w3_ptr.stat == 3) | (w4_bio.stat == 3 & w4_ptr.stat == 3)), 1,
+                ifelse(fstate %in% 1:2 & (w3_ptr.stat %in% 1:2 | w4_ptr.stat %in% 1:2), 1,
+                       ifelse(fstate == 3 & (w3_bio.stat %in% 1:2 | w4_bio.stat %in% 1:2), 1, 0))), ## Ever Transition into a single-mother family
+    fstate = factor(fstate, levels = 1:5, labels = c("Stable2BP", "Transit2BP", "TransitSF", "TransitSingle", "StableSingle"))
+  ) %>% 
+  dplyr::select(idnum, .imp, fstate, matches(fstate, ignore.case = F),
+                tc1_kgirl, tc1_klbw, tc1_meth, tc1_medu, tc1_mimm, tc1_mwithp, tc1_mage, tc1_kfirst,
+                tc1_malc, tc1_mdrug, tc1_msmoke, tc1_mrelig, tc1_mwork, tc2_tanfY0, tc1_lnincome, tc1_mhhown, tc1_kids, tc1_adults, tc1_fedu, tc1_fage,
+                tc1_fwork, tc1_relLen, tc1_abort, tc2_finjail, tc2_fsubp, tc2_flimit, tc2_fabuse, tc2_mwork, tc2_tanf, tc2_lnincome, tc2_gparent) %>% 
+  left_join(dep.tmp, by = "idnum")
+data1 <- raw %>% 
+  mutate(
+    w2_S2BP = ifelse(w1_bio.stat %in% 1:2 & w2_bio.stat %in% 1:2, 1, 0), ### Stable two-biological-parent family
+    w2_T2BP = ifelse(w1_bio.stat == 3 & w2_bio.stat %in% 1:2, 1, 0), ## Transition into a two-biological-parent family
+    w2_TSF = ifelse(w2_ptr.stat %in% 1:2, 1, 0), ## Transition into a social-father family
+    w2_TS = ifelse(w1_bio.stat %in% 1:2 & w2_bio.stat == 3 & w2_ptr.stat == 3, 1, 0), ## Transition into a single-mother family
+    w2_SS = ifelse(w1_bio.stat == 3 & w2_bio.stat == 3 & w2_ptr.stat == 3, 1, 0), ## Stable single-mother family
+    w2_SSF = 0,
+    
+    w3_S2BP = ifelse(fstate %in% 1:2 & w3_bio.stat %in% 1:2, 1, 0), ## Stable two-biological-parent family
+    w3_T2BP = ifelse(!(fstate %in% 1:2) & w3_bio.stat %in% 1:2, 1, 0), ## Ever Transition into a two-biological-parent family
+    w3_SSF = ifelse(fstate == 3 & w3_ptr.stat %in% 1:2, 1, 0), ## Stable social-father family
+    w3_TSF = ifelse(fstate != 3 & w3_ptr.stat %in% 1:2, 1, 0), ## Ever Transition into a social-father family
+    w3_SS = ifelse(fstate %in% 4:5 & w3_bio.stat == 3 & w3_ptr.stat == 3, 1, 0), ## Stable single-mother family
+    w3_TS = ifelse(!(fstate %in% 4:5) & (w3_bio.stat == 3 & w3_ptr.stat == 3), 1, 0), ## Ever Transition into a single-mother family
+    
+    w4_S2BP = ifelse(fstate %in% 1:2 & w3_bio.stat %in% 1:2 & w4_bio.stat %in% 1:2, 1, 0), ## Stable two-biological-parent family
+    w4_T2BP = ifelse(!(fstate %in% 1:2) & w4_bio.stat %in% 1:2, 1, 0), ## Ever Transition into a two-biological-parent family
+    w4_SSF = ifelse(fstate == 3 & w3_ptr.stat %in% 1:2 & w4_ptr.stat %in% 1:2, 1, 0), ## Stable social-father family
+    w4_TSF = ifelse(fstate != 3 & w4_ptr.stat %in% 1:2, 1, 0), ## Ever Transition into a social-father family
+    w4_SS = ifelse(fstate %in% 4:5 & w3_bio.stat == 3 & w3_ptr.stat == 3 & w4_bio.stat == 3 & w4_ptr.stat == 3, 1, 0), ## Stable single-mother family
+    w4_TS = ifelse(!(fstate %in% 4:5) & (w4_bio.stat == 3 & w4_ptr.stat == 3), 1, 0), ## Ever Transition into a single-mother family
+    fstate = factor(fstate, levels = 1:5, labels = c("Stable2BP", "Transit2BP", "TransitSF", "TransitSingle", "StableSingle"))
+  ) %>% 
+  dplyr::select(idnum, .imp, fstate, matches(fstate, ignore.case = F),
+                tc1_kgirl, tc1_klbw, tc1_meth, tc1_medu, tc1_mimm, tc1_mwithp, tc1_mage, tc1_kfirst,
+                tc1_malc, tc1_mdrug, tc1_msmoke, tc1_mrelig, tc1_mwork, tc2_tanfY0, tc1_lnincome, tc1_mhhown, tc1_kids, tc1_adults, tc1_fedu, tc1_fage,
+                tc1_fwork, tc1_relLen, tc1_abort, tc2_finjail, tc2_fsubp, tc2_flimit, tc2_fabuse, tc2_mwork, tc2_tanf, tc2_lnincome, tc2_gparent) %>% 
+  left_join(dep.tmp, by = "idnum")
+
+panel <- pivot_longer(data,
+                      cols = starts_with("w"),
+                      names_to = c("wave", ".value"),
+                      names_sep = "_",
+                      names_prefix = "w") %>% 
+  mutate(AGE = case_when(wave == 2 ~ 0,
+                         wave == 3 ~ 2,
+                         wave == 4 ~ 4))
+panel.alt <- pivot_longer(data1,
+                          cols = starts_with("w"),
+                          names_to = c("wave", ".value"),
+                          names_sep = "_",
+                          names_prefix = "w") %>% 
+  mutate(AGE = case_when(wave == 2 ~ 0,
+                         wave == 3 ~ 2,
+                         wave == 4 ~ 4))
+```
+
+# Frequentist Replication: Multilevel modeling using lme4
+
+```{r freq, include=F}
+covariate <- c(
+  "tc1_klbw", "tc1_mimm", "tc1_mwithp", "tc1_kfirst", "tc1_malc", "tc1_mdrug", "tc1_msmoke", "tc1_mrelig", "tc1_mwork",
+  "tc2_tanfY0", "tc1_lnincome", "tc1_mhhown", "tc1_kids", "tc1_adults", "tc1_fedu", "tc1_fage", "tc1_fwork", 
+  "tc1_relLen", "tc1_abort", "tc2_finjail", "tc2_fsubp", "tc2_flimit", "tc2_fabuse", "tc2_mwork", "tc2_tanf",
+  "tc2_lnincome", "tc2_gparent"
+)
+## Original formula
+form <- as.formula(paste0("stressz ~ fstate + AGE * (",
+                          paste0(fstate, collapse = "+"),
+                          "+ tc1_mage + tc1_kgirl + tc1_meth + tc1_medu) + ",
+                          paste0(covariate, collapse = "+"),
+                          "+ (1+AGE|idnum)"))
+
+cl <- makeForkCluster(10)
+doParallel::registerDoParallel(cl)
+
+m.rep <- foreach(i = 1:max(panel$.imp)) %dopar%
+  lmer(form,
+       REML = F,
+       data = panel[panel$.imp == i, ])
+
+stopCluster(cl)
+gc()
+```
+
+```{r freq-table, include=T, results='asis'}
+m.rep.p <- mice::pool(m.rep)
+
+## Mock model to plug in original coefficients from the study
+m.original.p <- lm(as.formula(paste0("stressz ~ fstate + AGE * (",
+                          paste0(fstate, collapse = "+"),
+                          "+ tc1_mage + tc1_kgirl + tc1_meth + tc1_medu) + ",
+                          paste0(covariate, collapse = "+"))), data = panel[panel$.imp == 1, ])
+
+m.original.p$coefficients["fstateTransit2BP"] <- -.071
+m.original.p$coefficients["fstateTransitSF"] <- .167
+m.original.p$coefficients["fstateTransitSingle"] <- -.045
+m.original.p$coefficients["fstateStableSingle"] <- .021
+m.original.p$coefficients["T2BP"] <- -.059
+m.original.p$coefficients["TSF"] <- .148
+m.original.p$coefficients["TS"] <- -.044
+m.original.p$coefficients["SS"] <- .106
+m.original.p$coefficients["SSF"] <- -.137
+m.original.p$coefficients["AGE:T2BP"] <- -.015
+m.original.p$coefficients["AGE:TSF"] <- -.016
+m.original.p$coefficients["AGE:TS"] <- .029
+m.original.p$coefficients["AGE:SS"] <- -.011
+m.original.p$coefficients["AGE:SSF"] <- -.060
+
+vcov1 <- sqrt(diag(stats::vcov(m.original.p)))
+vcov1["fstateTransit2BP"] <- .057
+vcov1["fstateTransitSF"] <- .092
+vcov1["fstateTransitSingle"] <- .082
+vcov1["fstateStableSingle"] <- .077
+vcov1["T2BP"] <- .083
+vcov1["TSF"] <- .068
+vcov1["TS"] <- .047
+vcov1["SS"] <- .080
+vcov1["SSF"] <- .162
+vcov1["AGE:T2BP"] <- .016
+vcov1["AGE:TSF"] <- .013
+vcov1["AGE:TS"] <- .011
+vcov1["AGE:SS"] <- .013
+vcov1["AGE:SSF"] <- .036
+
+coef_labels <- c("fstateTransit2BP" = "To 2 BioParents b/w Y0 and Y1",
+                 "fstateTransitSF" = "To SocialFather b/w Y0 and Y1",
+                 "fstateTransitSingle" = "To SingleMother b/w Y0 and Y1",
+                 "fstateStableSingle" = "Always SingleMother b/w Y0 and Y1",
+                 "T2BP" = "Ever Transit to 2 BioParents b/w Y1 and Y5",
+                 "TSF" = "Ever Transit to SocialFather b/w Y1 and Y5",
+                 "TS" = "Ever Transit to SingleMother b/w Y1 and Y5",
+                 "SS" = "Stable SingleMother b/w Y1 and Y5",
+                 "SSF" = "Stable SocialFather b/w Y1 and Y5",
+                 "AGE:T2BP" = "AGE x Ever Transit to 2 BioParents b/w Y1 and Y5",
+                 "AGE:TSF" = "AGE x Ever Transit to SocialFather b/w Y1 and Y5",
+                 "AGE:TS" = "AGE x Ever Transit to SingleMother b/w Y1 and Y5",
+                 "AGE:SS" = "AGE x Stable SingleMother b/w Y1 and Y5",
+                 "AGE:SSF" = "AGE x Stable SocialFather b/w Y1 and Y5"
+                 )
+stargazer::stargazer(m.original.p, title = "The Original Model Fit",
+                     se = list(vcov1), 
+                     digits = 3,
+                     dep.var.labels = "Maternal Stress",
+                     star.cutoffs = c(.05, .01, .001),
+                     star.char = c("*", "**", "***"), omit.table.layout = "s",
+                     covariate.labels = coef_labels,
+                     header = F, out.header = F, no.space = T,
+                     omit = "tc[0-9]_|^sd|^cor|AGE$|^Cons")
+
+row0 <- tribble(~term, ~`Replicated`,
+               "Intercept", "",
+               "Slope", "")
+attr(row0, "position") <- c(1, 20)
+modelsummary::modelsummary(list("Replicated" = m.rep.p), title = "Replication Results",
+                           fmt = 3, stars = c("*" = .05, "**" = .01, "***" = .001), add_rows = row0,
+                           coef_omit = "tc[0-9]_|^sd|^cor|AGE$|^\\(",
+                           coef_rename = coef_labels)
+
+```
+
+# BAYESIAN REPLICATION
+
+Table 3 lists coefficients produced from the Frequentist and Bayesian models. Although there are some variations between the coefficient pairs, fitting a Bayesian model did not change the results much. Posterior Predictive plot revealed that the estimated bayes model fairly well reproduced the original distribution of the dependent variable, `parental stress`. However, the PSIS diagnostic values and its plot show that 350 observations had a pareto k that exceeds 0.7, which may originate from not very informative priors or model misspecifications.
+
+```{r bayesian, include=F}
+## macOS 12.3 arm64 backend::cmdstanr
+plan(multisession(workers = 10)) 
+m1_bayes <- brm_multiple(form,
+                         family = brmsfamily("gaussian"),
+                         prior = c(prior(normal(0, 1), class = b),
+                                   prior(normal(0, 1), class = Intercept)),
+                         chains = 1, iter = 2000,
+                         data = split(panel, panel$.imp), backend = "cmdstanr")
+
+```
+
+```{r bayesian-check, include=T}
+pp_check(m1_bayes)
+loo <- loo(m1_bayes)
+plot(loo)
+```
+
+```{r freq-bayes-table, include=T, cache=F}
+row1 <- tribble(~term, ~Freq, ~Bayes,
+               "Intercept", "", "",
+               "Slope", "", "")
+attr(row1, "position") <- c(1, 20)
+modelsummary::modelsummary(list("Frequentist" = m.rep.p,
+                                "Bayesian" = m1_bayes),
+                           fmt = 2, coef_omit = "tc[0-9]_|^sd|^cor|AGE$|^\\(",
+                           coef_rename = coef_labels, add_rows = row1,
+                           statistic = "conf.int",
+                           metrics = "RMSE", title = "Comparison 1: Frequentist vs. Bayesian Models")
+```
+
+# ALTERNATIVE SPECIFICATIONS
+
+I tried three different model specifications: (a) a random-intercept model instead of the original random-coefficient model (in which the coefficient of `AGE` varied randomly across the grouping variable, `idnum`); (b) a model using extensive controls to estimate slope coefficients, which were originally used to estimate intercepts only; and (c) a model with a completely different, if not improved, independent variable. Table 4 displays coefficient estimates from the alternative models, along with ones from the original replicated model.
+
+I paid extra attention to the third alternative model that uses a differently operationalized independent variable. The original independent variable evaluates if the sample families *ever* experienced transitions into certain family structures (e.g., single-mother family structure) between Year 1 and 5. Problematic here is that the authors constructed a not mutually exclusive set of dummy variables. For example, according to the way the authors constructed the variable, a family that transitioned from a two-parent structure to a single-parent structure between Y1 and Y3 and then to a step-parent structure between Y3 and Y5 belongs to both 'Ever transitioned to Single Mother' and 'Ever transitioned to Social Father' groups. This one family will thus be used for estimating both coefficients. Although it may not induce statistical problems, it significantly impairs the substantive interpretability of the coefficients.
+
+To deal with this problem, I evaluated the sample families' family structure at each specific wave (Year 1, 3, and 5) and constructed a new time-varying independent variable.
+
+```{r alternative-spec, include=F}
+## Random-intercept model with lme4
+form.reint <- as.formula(paste0("stressz ~ fstate + AGE * (",
+                                paste0(fstate, collapse = "+"),
+                                "+ tc1_mage + tc1_kgirl + tc1_meth + tc1_medu) + ",
+                                paste0(covariate, collapse = "+"),
+                                "+ (1|idnum)"))
+
+## Extensive set of covariates for estimating slope parameters
+form.extensive <- as.formula(paste0("stressz ~ fstate + AGE * (",
+                                    paste0(fstate, collapse = "+"),
+                                    "+ tc1_mage + tc1_kgirl + tc1_meth + tc1_medu + ",
+                                    paste0(covariate, collapse = "+"),
+                                    ") + (1+AGE|idnum)"))
+
+cl <- makeForkCluster(10)
+doParallel::registerDoParallel(cl)
+m.reint <- foreach(i = 1:max(panel$.imp)) %dopar%
+  lmer(form.reint,
+       REML = F,
+       data = panel[panel$.imp == i, ])
+m.extensive <- foreach(i = 1:max(panel$.imp)) %dopar%
+  lmer(form.extensive,
+       REML = F,
+       data = panel[panel$.imp == i, ])
+m.alt <- foreach(i = 1:max(panel$.imp)) %dopar%
+  lmer(form,
+       REML = F,
+       data = panel.alt[panel.alt$.imp == i, ])
+stopCluster(cl)
+gc()
+
+m.reint.p <- mice::pool(m.reint)
+m.extensive.p <- mice::pool(m.extensive)
+m.alt.p <- mice::pool(m.alt)
+
+```
+
+# DISCUSSION
+
+There are two take-home points worth our attention. First, there were some incongruities between what the paper said they had done and the actual data. For example, I could not find a Temporary Assistance for Needy Families (TANF) measure at Year 0 that the authors purported to have included as a covariate in the models. I am not sure if this variable was removed since new releases of the data set or if it is simply the authors' mistake.
+
+Second, replicating the original models revealed that the way the authors operationalized the independent variable could have been controversial if the authors had described the strategy in detail. They label the coefficients with a word 'ever', which implies that one family can belong to several categories simultaneously. A hypothetical family that stayed in a single-mother structure for a very short period of time and then transitioned into a stepfamily structure and stayed there for the rest of the years can be used for estimating both coefficients; this suggests that the coefficient for single-mother structure may have been estimated from families that had rarely had the single-mother structure experience.
+
+If two differently operationalized variables that are intended to measure the same underlying concept of interest (in this case, family structure transitions) yielded widely discrepant results, not only the replicability but also the validity and reliability of social science might be at stake. Although it is nearly impossible to set forth the 'correct' operationalization conventions, this replication project still indicates that researchers should be more explicit about how their variables are constructed and what are the objectives and weaknesses of the variables.
+
+```{r final-table, include=T}
+row2 <- tribble(~term, ~Freq, ~`Random Intercept`, ~`Extensive Control`, ~`Alt. Independent`,
+               "Intercept", "", "", "", "",
+               "Slope", "", "", "", "")
+attr(row2, "position") <- c(1, 20)
+modelsummary::modelsummary(list("Replicated" = m.rep.p,
+                                "Random Intercept" = m.reint.p,
+                                "Extensive Control" = m.extensive.p,
+                                "Alt. Independent" = m.alt.p),
+                           fmt = 2, coef_omit = "tc[0-9]_|^sd|^cor|AGE$|^\\(",
+                           coef_rename = coef_labels, add_rows = row2,
+                           stars = c("*" = .05, "**" = .01, "***" = .001),
+                           title = "Comparison 2: Alternative Specifications",
+                           output = "kableExtra") %>%
+  kableExtra::landscape()
+```
+
+# REFERENCES
