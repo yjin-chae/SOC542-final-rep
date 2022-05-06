@@ -18,6 +18,7 @@ header-includes:
     - \pagenumbering{arabic}
     - \usepackage{setspace}\doublespacing
     - \usepackage{booktabs}
+    - \usepackage{amsmath}
 ---
 
 ```{r setup, include=FALSE}
@@ -53,12 +54,45 @@ library(tidyverse)
 
 # INTRODUCTION
 
-For the final replication project, I chose a work by @RN222. Using data from the Fragile Families and Child Wellbeing Study (FFCW), this study investigates how mothers' exposure to family structure transitions and its durations are associated with changes in maternal resources-- parenting stress, depression, and material hardship. For replication, I focused on parenting stress, for it was the only dependent variable without issues. That is, the authors stated that a hierarchical linear regression of depression with random intercepts and coefficients failed to converge. For material hardship, I found the FFCW data set lacked one variable, `phone disconnection`, that the authors purported to have used to construct the material hardship scale.  
+For the final replication project, I chose a work by @RN222. Using data from the Fragile Families and Child Wellbeing Study (FFCW), this study investigates how mothers' exposure to family structure transitions between Year1 and Year5 and its duration are associated with changes in maternal resources-- parenting stress, depression, and material hardship. For replication, I focused on parenting stress, for it was the only dependent variable without issues. That is, the authors stated that a regression of depression with random intercepts and coefficients failed to converge. For material hardship, I found the FFCW data set lacked one variable, `phone disconnection`, that the authors purported to have used to construct the material hardship scale.  
 Although I could not find code to replicate the data set and models in the study, I managed to write code to produce a similar data set and models. 
 
 # REPLICATION
+# Frequentist Replication: Multilevel modeling using lme4
 
-Table 1 and 2 show the original and replicated coefficients, respectively. The replication was a half-success; the slope parameters of the hierarchical linear models (HLM) were quite closely replicated but the intercept parameters were not. My conjecture is that the discrepancies in the intercepts can probably result from misconstructed controls. That is, a full set of covariates were included to estimate the intercepts, whereas only a subset of them (and the independent variable) were interacted with `AGE` to estimate the slopes; as I had no problem cleaning a few controls for the slopes but encountered several issues cleaning controls for the intercepts, more discrepancy is likely in the intercepts. For example, Temporary Assistance for Needy Families (TANF), which should have been included to estimate the intercepts but not the slopes, was missing in the original FFCW data set.
+The Hierarchical Linear Models (HLMs) estimated in the study have the following generic form:
+$$
+Y_{ti} = P_{0i} + P_{1i}AGE + E_{ti}  
+$$
+
+$$
+P_{0i} = B_{00} + B_{01}FS_{0i} + B_{02}FAM_{0i} + B_{03}FS_{ti} + E_{0i}
+$$
+$$
+P_{1i} = B_{t0} + B_{t1}FS_{ti} + B_{t3}FAM_{0i} + E_{1i}
+$$
+where $P_{0i}$ is the initial levels of parenting stress, and $P_{1i}$ changes in parenting stress every year between Y1 and Y5. $FS_{0i}$ is a vector of the initial family structure transitions between Y0 and Y1, $FS_{ti}$ a vector of the subsequent family structure transitions between Y1 and Y5 (Stable two-parent, Stable single-mother, Stable social-father, Ever transition to two-parent, Ever transition to single-mother, and Ever transition to social-father), $FAM_{0i}$ a vector of time-invariant background characteristics, and $E_{0i}$ and $E_{1i}$ random error components.
+
+These equations indicate that $FS_{ti}$ was constructed as a time-varying variable, but my replication revealed that this variable was in fact operationalized as time-invariant. That is, each family is assigned a constant for all Y1, Y3, and Y5. Problematic here is that some families experienced multiple transitions; In this case, just as the authors used the term *ever* in the labels, all relevant dummies were coded as 1 (e.g., both Ever transition to single-mother and Ever transition to social-father coded as 1.) These vectors are thus not mutually exclusive.
+
+The equations are revised as follows to more accurately reflect the authors' modeling strategy.
+$$
+Y_{ti} = P_{0i} + P_{1i}AGE_{ti} + e_{ti} \text{,  }t = Y1, Y3, Y5
+$$
+
+$$
+P_{0i} = B_{00} + B_{01}FS_{[0-1],i} + B_{02}FAM_{0i} + B_{03}FS_{(1-5],i} + u_{0i}
+$$
+$$
+P_{1i} = B_{10} + B_{11}FS_{(1-5],i} + B_{13}Sub\_FAM_{0i} + u_{1i}
+$$
+where $e_{ti}$ is idiosyncratic errors, $u_{0i}$ and $u_{1i}$ individual-level random errors, and $FS_{(1-5],i}$ a vector of time-invariant, not mutually exclusive dummies measuring family structure transitions between Y1 and Y5. $B_{13}Sub\_FAM_{0i}$ indicates that only a subset of covariates (mother' age, race, and education, and child's gender) were used to estimate the slopes. The parameter of interest is $B_{11}$, indicating changes in `parenting stress` per year in certain family structures compared to stably living in the two-parent family structure.
+
+According to the authors, $B_{03}$ show coefficients for what they call `falsification test`. It tests if future transitions are associated with the initial levels of `parenting stress` (at Y1, or `AGE` = 0.) Statistically significant terms indicate that mothers who will experience certain family structures already had low (or high) parenting stress compared to those who live in the two-parent structure.
+
+The falsification test appears to be the reason they constructed the main independent variable, $B_{11}FS_{(1-5],i}$, as time-invariant. This is because families should have future values (of Y3 and Y5) for Y1 in terms of data structure so that, when interacted with `AGE`, the main term shows coefficients for the future events when `AGE` equals 0. Regressing past outcome on future experience is impossible if each family has time-varying values that correspond at each year.
+
+Table 1 and 2 respectively show the original and replicated coefficients, $B_{01}$, $B_{03}$, and $B_{11}$. The replication was a half-success; the slope parameters of the hierarchical linear models (HLM) were quite closely replicated but the intercept parameters were not. My conjecture is that the discrepancies in the intercepts can probably result from misconstructed controls. That is, a full set of covariates were included to estimate the intercepts, whereas only a subset of them (and the independent variable, $FS_{(1-5],i}$) were interacted with `AGE` to estimate the slopes; as I had no problem cleaning a few controls for the slopes but encountered several issues cleaning controls for the intercepts, more discrepancy is likely in the intercepts. For example, Temporary Assistance for Needy Families (TANF), which should have been included to estimate the intercepts but not the slopes, was missing in the original FFCW data set.
 
 ```{r download}
 options(timeout = 300)
@@ -300,8 +334,6 @@ panel.alt <- pivot_longer(data1,
                          wave == 4 ~ 4))
 ```
 
-# Frequentist Replication: Multilevel modeling using lme4
-
 ```{r freq, include=F}
 covariate <- c(
   "tc1_klbw", "tc1_mimm", "tc1_mwithp", "tc1_kfirst", "tc1_malc", "tc1_mdrug", "tc1_msmoke", "tc1_mrelig", "tc1_mwork",
@@ -443,9 +475,9 @@ modelsummary::modelsummary(list("Frequentist" = m.rep.p,
 
 I tried three different model specifications: (a) a random-intercept model instead of the original random-coefficient model (in which the coefficient of `AGE` varied randomly across the grouping variable, `idnum`); (b) a model using extensive controls to estimate slope coefficients, which were originally used to estimate intercepts only; and (c) a model with a completely different, if not improved, independent variable. Table 4 displays coefficient estimates from the alternative models, along with ones from the original replicated model.
 
-I paid extra attention to the third alternative model that uses a differently operationalized independent variable. The original independent variable evaluates if the sample families *ever* experienced transitions into certain family structures (e.g., single-mother family structure) between Year 1 and 5. Problematic here is that the authors constructed a not mutually exclusive set of dummy variables. For example, according to the way the authors constructed the variable, a family that transitioned from a two-parent structure to a single-parent structure between Y1 and Y3 and then to a step-parent structure between Y3 and Y5 belongs to both 'Ever transitioned to Single Mother' and 'Ever transitioned to Social Father' groups. This one family will thus be used for estimating both coefficients. Although it may not induce statistical problems, it significantly impairs the substantive interpretability of the coefficients.
+I paid extra attention to the third alternative model that uses a differently operationalized independent variable. The original independent variable evaluates if the sample families *ever* transitioned into certain family structures between Year 1 and 5, resulting in a not mutually exclusive set of dummy variables. For example, a family that transitioned from a two-parent structure to a single-parent structure between Y1 and Y3 and then to a social-father structure between Y3 and Y5 belongs to both 'Ever transitioned to Single Mother' and 'Ever transitioned to Social Father' groups. This one family will thus be used for estimating both coefficients. Although it may not induce statistical problems, it significantly impairs the substantive interpretability of the coefficients.
 
-To deal with this problem, I evaluated the sample families' family structure at each specific wave (Year 1, 3, and 5) and constructed a new time-varying independent variable.
+To deal with this problem, I evaluated the sample families' family structure at each specific wave (Year 1, 3, and 5) and constructed a new time-varying independent variable. A regression model using this new variable lost most of the statistical significance found in the original model.
 
 ```{r alternative-spec, include=F}
 ## Random-intercept model with lme4
