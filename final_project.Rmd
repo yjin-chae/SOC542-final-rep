@@ -74,23 +74,23 @@ where $P_{0i}$ is the initial levels of parenting stress, and $P_{1i}$ changes i
 
 These equations indicate that $FS_{ti}$ was constructed as a time-varying variable, but my replication revealed that this variable was in fact operationalized as time-invariant. That is, each family is assigned a constant for all Y1, Y3, and Y5. Problematic here is that some families experienced multiple transitions; In this case, just as the authors used the term *ever* in the labels, all relevant dummies were coded as 1 (e.g., both Ever transition to single-mother and Ever transition to social-father coded as 1.) These vectors are thus not mutually exclusive.
 
-The equations are revised as follows to more accurately reflect the authors' modeling strategy.
+The equations are revised as follows to more accurately reflect the authors' modeling strategy. I replaced B with $\gamma$ to clearly distinguish coefficients from vectors.
 $$
-Y_{ti} = P_{0i} + P_{1i}AGE_{ti} + e_{ti} \text{,  }t = Y1, Y3, Y5
-$$
-$$
-P_{0i} = B_{00} + B_{01}FS_{[0-1],i} + B_{02}FAM_{0i} + B_{03}FS_{(1-5],i} + u_{0i}
+Y_{ti} = P_{0i} + P_{1i}AGE_{ti} + E_{ti} \text{,  }t = Y1, Y3, Y5
 $$
 $$
-P_{1i} = B_{10} + B_{11}FS_{(1-5],i} + B_{13}Sub\_FAM_{0i} + u_{1i}
+P_{0i} = \gamma_{00} + \gamma_{01}FS_{[0-1],i} + \gamma_{02}FAM_{0i} + \gamma_{03}FS_{(1-5],i} + u_{0i}
 $$
-where $e_{ti}$ is idiosyncratic errors, $u_{0i}$ and $u_{1i}$ individual-level random errors, and $FS_{(1-5],i}$ a vector of time-invariant, not mutually exclusive dummies measuring family structure transitions between Y1 and Y5. $Sub\_FAM_{0i}$ indicates that only a subset of covariates (mother' age, race, and education, and child's gender) were used to estimate the slopes. The parameter of interest is $B_{11}$, indicating changes in `parenting stress` per year in certain family structures compared to stably living in the two-parent family structure.
+$$
+P_{1i} = \gamma_{10} + \gamma_{11}FS_{(1-5],i} + \gamma_{13}SubFAM_{0i} + u_{1i}
+$$
+where $E_{ti}$ is idiosyncratic errors, $u_{0i}$ and $u_{1i}$ individual-level random errors, and $FS_{(1-5],i}$ a vector of time-invariant, not mutually exclusive dummies measuring family structure transitions between Y1 and Y5. $SubFAM_{0i}$ indicates that only a subset of covariates (mother' age, race, and education, and child's gender) were used to estimate the slopes. The parameter of interest is $\gamma_{11}$, indicating changes in `parenting stress` per year in certain family structures compared to stably living in the two-parent family structure.
 
-According to the authors, $B_{03}$ show coefficients for what they call `falsification test`. It tests if future transitions are associated with the initial levels of `parenting stress` (at Y1, or `AGE` = 0.) Statistically significant terms indicate that mothers who will experience certain family structures already had low (or high) parenting stress compared to those who live in the two-parent structure.
+According to the authors, $\gamma_{03}$ show coefficients for what they call `falsification test`. It tests if future transitions are associated with the initial levels of `parenting stress` (at Y1, or `AGE` = 0.) Statistically significant terms indicate that mothers who will experience certain family structures already had low (or high) parenting stress compared to those who live in the two-parent structure.
 
 The falsification test appears to be the reason they constructed the main independent variable, $FS_{(1-5],i}$, as time-invariant. This is because families should have future values (of Y3 and Y5) for Y1 in terms of data structure so that, when interacted with `AGE`, the main term shows coefficients for the future events when `AGE` equals 0. Regressing past outcome on future experience is impossible if each family has time-varying values that correspond at each year.
 
-Table 1 and 2 respectively show the original and replicated coefficients, $B_{01}$, $B_{03}$, and $B_{11}$. The replication was a half-success; the slope parameters of the hierarchical linear models (HLM) were quite closely replicated but the intercept parameters were not. My conjecture is that the discrepancies in the intercepts can probably result from misconstructed controls. That is, a full set of covariates were included to estimate the intercepts, whereas only a subset of them (and the independent variable, $FS_{(1-5],i}$) were interacted with `AGE` to estimate the slopes; as I had no problem cleaning a few controls for the slopes but encountered several issues cleaning controls for the intercepts, more discrepancy is likely in the intercepts. For example, Temporary Assistance for Needy Families (TANF), which should have been included to estimate the intercepts but not the slopes, was missing in the original FFCW data set.
+Table 1 and 2 respectively show the original and replicated coefficients, $\gamma_{01}$, $\gamma_{03}$, and $\gamma_{11}$. The replication was a half-success; the slope parameters of the hierarchical linear models (HLM) were quite closely replicated but the intercept parameters were not. My conjecture is that the discrepancies in the intercepts can probably result from misconstructed controls. That is, a full set of covariates were included to estimate the intercepts, whereas only a subset of them (and the independent variable, $FS_{(1-5],i}$) were interacted with `AGE` to estimate the slopes; as I had no problem cleaning a few controls for the slopes but encountered several issues cleaning controls for the intercepts, more discrepancy is likely in the intercepts. For example, Temporary Assistance for Needy Families (TANF), which should have been included to estimate the intercepts but not the slopes, was missing in the original FFCW data set.
 
 ```{r download}
 options(timeout = 300)
