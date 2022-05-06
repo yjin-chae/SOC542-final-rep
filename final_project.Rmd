@@ -111,7 +111,7 @@ Y1age_imp <- total %>%
          Y1age_imp = round(as.numeric(Y1 - Y0) / 31)) %>%
   dplyr::select(idnum, Y1age_imp)
 
-## Material Hardship
+## Parenting stress
 b_age <- total %>% 
   dplyr::select(idnum, cm2b_age, cm3b_age, cm4b_age) %>% 
   full_join(Y1age_imp, by = "idnum") %>% 
@@ -159,7 +159,7 @@ stress.tmp <- total %>%
          w4_stress = rowMeans(across(starts_with("m4")))) %>%
   dplyr::select(idnum, starts_with("w"))
 
-## Full set of dependent variables; age standardized in three-month age intervals.
+## Age standardized in three-month age intervals.
 dep.tmp <- left_join(b_age, stress.tmp, by = "idnum") %>% 
   group_by(age2_group) %>% 
   mutate(w2_stressz = scale(w2_stress)[ ,1]) %>% ungroup() %>% 
@@ -201,7 +201,7 @@ demo1.tmp <- total %>%
                 cm2ffevjail,
                 m2c34, ## Father has limiting condition
                 m2d6h,
-                m2h10a, m2h10b, ## Age0 TANF; (among those who received TANF at Age0) Age1 TANF (-6 == 0):: Distribution significantly deviant
+                m2h10a, m2h10b, ## TANF; (among those who received TANF at Age0) Age1 TANF (-6 == 0):: Distribution significantly deviant
                 cm1hhinc, cm2hhinc) %>%  
   mutate(tc2_tanfY0 = c(1, 0)[match(m2h10a, c(1, 2))],
          tc2_tanf = c(1, 0, 0)[match(m2h10b, c(1, 2, -6))],
