@@ -64,7 +64,6 @@ The Hierarchical Linear Models (HLMs) estimated in the study have the following 
 $$
 Y_{ti} = P_{0i} + P_{1i}AGE + E_{ti}  
 $$
-
 $$
 P_{0i} = B_{00} + B_{01}FS_{0i} + B_{02}FAM_{0i} + B_{03}FS_{ti} + E_{0i}
 $$
@@ -79,7 +78,6 @@ The equations are revised as follows to more accurately reflect the authors' mod
 $$
 Y_{ti} = P_{0i} + P_{1i}AGE_{ti} + e_{ti} \text{,  }t = Y1, Y3, Y5
 $$
-
 $$
 P_{0i} = B_{00} + B_{01}FS_{[0-1],i} + B_{02}FAM_{0i} + B_{03}FS_{(1-5],i} + u_{0i}
 $$
