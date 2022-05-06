@@ -60,12 +60,14 @@ Although I could not find code to replicate the data set and models in the study
 
 Table 1 and 2 show the original and replicated coefficients, respectively. The replication was a half-success; the slope parameters of the hierarchical linear models (HLM) were quite closely replicated but the intercept parameters were not. My conjecture is that the discrepancies in the intercepts can probably result from misconstructed controls. That is, a full set of covariates were included to estimate the intercepts, whereas only a subset of them (and the independent variable) were interacted with `AGE` to estimate the slopes; as I had no problem cleaning a few controls for the slopes but encountered several issues cleaning controls for the intercepts, more discrepancy is likely in the intercepts. For example, Temporary Assistance for Needy Families (TANF), which should have been included to estimate the intercepts but not the slopes, was missing in the original FFCW data set.
 
-```{r data}
+```{r download}
 options(timeout = 300)
 download.file("https://www.dropbox.com/s/tgpg57jezdu1z5p/FF_allwaves_2020v2_SPSS.sav?dl=1",
               destfile = "FF_allwaves_2020v2_SPSS.sav")
 original <- haven::read_spss("FF_allwaves_2020v2_SPSS.sav")
+```
 
+```{r data}
 ## Sample : PCG - biological mother
 total <- original %>%
   filter(cm1intmon != -9, cm2mint == 1, cm3mint == 1, cm4mint == 1)
@@ -167,7 +169,7 @@ demo1.tmp <- total %>%
                 cm2ffevjail,
                 m2c34, ## Father has limiting condition
                 m2d6h,
-                m2h10a, m2h10b, ## Age0 TANF; (among those who received TANF at Age0) Age1 TANF (-6 == 0)
+                m2h10a, m2h10b, ## Age0 TANF; (among those who received TANF at Age0) Age1 TANF (-6 == 0):: Distribution significantly deviant
                 cm1hhinc, cm2hhinc) %>%  
   mutate(tc2_tanfY0 = c(1, 0)[match(m2h10a, c(1, 2))],
          tc2_tanf = c(1, 0, 0)[match(m2h10b, c(1, 2, -6))],
