@@ -79,7 +79,7 @@ $$
 Y_{ti} = P_{0i} + P_{1i}AGE_{ti} + E_{ti} \text{,  }t = Y1, Y3, Y5
 $$
 $$
-P_{0i} = \gamma_{00} + \gamma_{01}FS_{[0-1],i} + \gamma_{02}FAM_{0i} + \gamma_{03}FS_{(1-5],i} + u_{0i}
+P_{0i} = \gamma_{00} + \gamma_{01}FS_{(0-1],i} + \gamma_{02}FAM_{0i} + \gamma_{03}FS_{(1-5],i} + u_{0i}
 $$
 $$
 P_{1i} = \gamma_{10} + \gamma_{11}FS_{(1-5],i} + \gamma_{13}SubFAM_{0i} + u_{1i}
